@@ -1,0 +1,14 @@
+# Virtual environments
+env/
+venv/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Environment Variables
+.env
+*.env
+*.env.*

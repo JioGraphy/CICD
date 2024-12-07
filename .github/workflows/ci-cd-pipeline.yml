@@ -1,0 +1,78 @@
+name: CI/CD Pipeline
+
+# Event Targets
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Workflows
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: flask-app
+      DEPLOYMENT_NAME: my-app
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      # Install required dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+
+      # Build Docker Image
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.ECR_REPOSITORY }} ./app
+
+      # Login to AWS ECR Repository
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      # Tags & Push Docker Image to AWS ECR
+      - name: Push Docker image to ECR
+        run: |
+          docker tag ${{ env.ECR_REPOSITORY }}:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+
+      # Deploy to AWS EKS
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f k8s/deployment.yaml
+
+      # Verify Deployment Status
+      - name: Verify Deployment
+        run: |
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=60s
+
+      # Rollback on Failure
+      - name: Rollback Deployment (On Failure)
+        if: failure()
+        run: |
+          echo "Deployment failed. Rolling back to the previous version..."
+          kubectl rollout undo deployment/${{ env.DEPLOYMENT_NAME }}
